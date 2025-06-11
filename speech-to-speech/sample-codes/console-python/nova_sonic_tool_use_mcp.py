@@ -94,6 +94,7 @@ class MCPManager:
         for session, server_type, cfg in self.sessions:
             tools_result = await session.list_tools()
             for tool in tools_result.tools:
+                print(f"[DEBUG] MCP server tool: name={tool.name}, schema={tool.inputSchema}")
                 all_tools.append({
                     'name': tool.name,
                     'description': tool.description,
@@ -109,7 +110,9 @@ class MCPManager:
             tools_result = await session.list_tools()
             for tool in tools_result.tools:
                 if tool.name == tool_name:
+                    print(f"[DEBUG] MCPManager.call_tool: tool_name={tool_name}, tool_input={tool_input}")
                     response = await session.call_tool(tool_name, tool_input)
+                    print(f"[DEBUG] Raw response from MCP server: {response}")
                     if hasattr(response, 'content'):
                         return [c.text for c in response.content]
                     return response
@@ -327,7 +330,7 @@ class BedrockStreamManager:
                         "sampleRateHertz": 24000,
                         "sampleSizeBits": 16,
                         "channelCount": 1,
-                        "voiceId": "matthew",
+                        "voiceId": "tiffany",
                         "encoding": "base64",
                         "audioType": "SPEECH"
                     },
@@ -344,18 +347,13 @@ class BedrockStreamManager:
     
     def tool_result_event(self, content_name, content, role):
         """Create a tool result event"""
-
-        if isinstance(content, dict):
-            content_json_string = json.dumps(content)
-        else:
-            content_json_string = content
-            
+        # Do NOT json.dumps the content if it's a dict; include it directly
         tool_result_event = {
             "event": {
                 "toolResult": {
                     "promptName": self.prompt_name,
                     "contentName": content_name,
-                    "content": content_json_string
+                    "content": content  # pass as dict or string, not stringified JSON
                 }
             }
         }
@@ -498,9 +496,9 @@ class BedrockStreamManager:
         await self.send_raw_event(content_start_event)
 
     async def send_tool_result_event(self, content_name, tool_result):
-        """Send a tool content event to the Bedrock stream."""
-        # Use the actual tool result from processToolUse
+        print(f"[DEBUG] (pre-send-tool-result) self.is_active: {getattr(self, 'is_active', None)} self.stream_response: {getattr(self, 'stream_response', None)}")
         tool_result_event = self.tool_result_event(content_name=content_name, content=tool_result, role="TOOL")
+        print(f"[DEBUG] Full tool_result_event JSON: {tool_result_event}")
         debug_print(f"Sending tool result event: {tool_result_event}")
         await self.send_raw_event(tool_result_event)
     
@@ -585,6 +583,7 @@ class BedrockStreamManager:
                                 elif 'contentEnd' in json_data['event'] and json_data['event'].get('contentEnd', {}).get('type') == 'TOOL':
                                     debug_print("Processing tool use and sending result")
                                     toolResult = await self.processToolUse(self.toolName, self.toolUseContent)
+                                    print(f"[DEBUG] toolResult: {toolResult}")
                                     toolContent = str(uuid.uuid4())
                                     await self.send_tool_start_event(toolContent)
                                     await self.send_tool_result_event(toolContent, toolResult)
@@ -616,16 +615,31 @@ class BedrockStreamManager:
             self.is_active = False
 
     async def processToolUse(self, toolName, toolUseContent):
-        """Return the tool result, using MCP if available."""
         if self.mcp_manager:
-            # toolUseContent['content'] is a JSON string, parse it
+            print(f"[DEBUG] (pre-tool-call) self.is_active: {getattr(self, 'is_active', None)} self.stream_response: {getattr(self, 'stream_response', None)}")
             content = toolUseContent.get("content", "{}")
             try:
                 content_dict = json.loads(content)
             except Exception:
                 content_dict = {}
-            result = await self.mcp_manager.call_tool(toolName, content_dict)
-            return result
+            required = None
+            if hasattr(self, 'dynamic_tools') and self.dynamic_tools:
+                for tool in self.dynamic_tools:
+                    if tool['name'] == toolName:
+                        required = tool['inputSchema'].get('required', [])
+                        print(f"[DEBUG] Required fields for '{toolName}': {required}")
+            if required:
+                trimmed_input = {k: v for k, v in content_dict.items() if k in required}
+                print(f"[DEBUG] Sending only required fields: {trimmed_input}")
+            else:
+                trimmed_input = content_dict
+            print(f"[DEBUG] About to call MCP tool '{toolName}' with input: {trimmed_input}")
+            result = await self.mcp_manager.call_tool(toolName, trimmed_input)
+            print(f"[DEBUG] (post-tool-call) self.is_active: {getattr(self, 'is_active', None)} self.stream_response: {getattr(self, 'stream_response', None)}")
+            print(f"[DEBUG] MCP tool '{toolName}' result: {result}")
+            print("-"*10)
+            return json.dumps({"result": result})
+        
         # fallback to old logic if no MCP
         tool = toolName.lower()
         debug_print(f"Tool Use Content: {toolUseContent}")
