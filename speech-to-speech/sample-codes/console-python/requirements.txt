@@ -1,5 +1,19 @@
+# Core dependencies for Nova Sonic
+boto3>=1.38.33
 pyaudio>=0.2.13
 rx>=3.2.0
+pytz>=2025.2
+
+# WebRTC Audio Processing Module for echo cancellation
+livekit>=0.17.0
+numpy>=1.24.0
+
+# AWS SDK for Bedrock
+aws-sdk-bedrock-runtime>=0.0.2
 smithy-aws-core>=0.0.1
-pytz
-aws_sdk_bedrock_runtime
+
+# Optional but recommended for better audio handling
+scipy>=1.10.0
+
+mcp[cli]
+python-dotenv
