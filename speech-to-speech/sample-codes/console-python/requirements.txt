@@ -17,3 +17,6 @@ scipy>=1.10.0
 
 mcp[cli]
 python-dotenv
+
+# AWS SDK for SQS
+boto3
